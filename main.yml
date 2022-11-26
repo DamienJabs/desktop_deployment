@@ -226,11 +226,7 @@
         alias ap=ansible-playbook
 
         source <(kubectl completion zsh)
-        [[ /usr/bin/kubectl ]] && source <(kubectl completion zsh)
-        autoload -U +X bashcompinit && bashcompinit
-        autoload -Uz compinit && compinit
         export FZF_COMPLETION_OPTS='--border --info=inline'
-        export KUBECONFIG=$HOME/.kube/kubeconfig_all
         export EDITOR=nano
         export KUBECTX_CURRENT_FGCOLOR=$(tput setaf 1) # blue text
         export KUBECTX_CURRENT_BGCOLOR=$(tput setab 0) # white background
