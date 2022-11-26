@@ -1,0 +1,237 @@
+---
+- hosts: localhost
+  become: true
+  gather_facts: true
+  vars: 
+    apt_apps:  
+      - zsh
+      - terminator
+      - git
+      - pip
+      - wget
+      - curl
+      - htop
+      - ncdu
+      - net-tools
+      - jq
+      - remmina
+      - build-essential
+      - tree
+      - nmap
+      - screen
+      - docker-ce
+      - kubectl
+      - terraform
+      - helm
+
+    librairies:
+      - apt-transport-https
+      - software-properties-common
+      - gnupg 
+      - lsb-release
+      - ca-certificates
+
+  tasks:
+  - name: get user
+    shell: whoami
+    become: false
+    register: get_user
+
+  - name: Install librairies using apt-get
+    ansible.builtin.apt:
+      name: "{{ item }}"
+      state: present
+    loop: "{{ librairies }}"
+
+  - name: Install apt key
+    apt_key:
+      url: "{{ item.url }}"
+      keyring: "{{ item.keyring }}"
+    with_items:
+      - url: https://download.docker.com/linux/ubuntu/gpg
+        keyring: /etc/apt/keyrings/docker.gpg
+      - url: https://packages.cloud.google.com/apt/doc/apt-key.gpg
+        keyring: /usr/share/keyrings/kubernetes-archive-keyring.gpg
+      - url: https://apt.releases.hashicorp.com/gpg
+        keyring: /usr/share/keyrings/hashicorp-archive-keyring.gpg
+      - url: https://baltocdn.com/helm/signing.asc
+        keyring: /usr/share/keyrings/helm.gpg
+
+  - name: Add repositories to sources list
+    apt_repository:
+      repo: deb {{ item.repo }} {{ item.add }}
+      state: present
+      filename: "{{ item.file }}"
+    with_items:
+      - repo: '[arch=amd64 signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu'
+        add: '{{ ansible_distribution_release }} stable'
+        file: docker
+      - repo: '[signed-by=/usr/share/keyrings/kubernetes-archive-keyring.gpg] https://apt.kubernetes.io/'
+        add: 'kubernetes-xenial main'
+        file: kubernetes
+      - repo: '[signed-by=/usr/share/keyrings/hashicorp-archive-keyring.gpg] https://apt.releases.hashicorp.com'
+        add: '{{ ansible_distribution_release }} main'
+        file: hashicorp
+      - repo: '[arch=amd64 signed-by=/usr/share/keyrings/helm.gpg] https://baltocdn.com/helm/stable/debian/'
+        add: all main
+        file: helm-stable-debian
+
+  - name: Install package using apt-get
+    ansible.builtin.apt:
+      name: "{{ item }}"
+      state: present
+      update_cache: yes
+    loop: "{{ apt_apps }}"
+
+  - name: Install Docker Compose trough pip
+    pip:
+      name: docker-compose
+  
+  - name: Change shell
+    user:
+      name: "{{ get_user.stdout }}"
+      shell: /bin/zsh
+      groups: docker
+      append: yes
+  
+  - name: check if tfswitch is installed
+    ansible.builtin.stat:
+      path: /usr/local/bin/tfswitch
+    register: tfs
+  
+  - name: install tfswitch
+    ansible.builtin.shell: curl -L https://raw.githubusercontent.com/warrensbox/terraform-switcher/release/install.sh | bash
+    when: not tfs.stat.exists
+
+  - name: Check if oh-my-zsh is installed
+    ansible.builtin.stat:
+      path: /home/{{ get_user.stdout }}/.oh-my-zsh
+    register: omz
+    become: false    
+  
+  - name: install oh-my-zsh
+    ansible.builtin.shell: sh -c "$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)"
+    become: false
+    when: not omz.stat.exists
+
+  - name: Change zsh theme
+    lineinfile:
+      path: ~/.zshrc
+      regex: '^ZSH_THEME='
+      line: ZSH_THEME="agnoster"
+    become: yes
+    become: false
+    ignore_errors: yes
+  
+  - name: Check if fonts already exists
+    ansible.builtin.stat:
+      path: /home/{{ get_user.stdout }}/.config/fontconfig/conf.d/10-powerline-symbols.conf
+    register: fonts
+
+  - name: Download fonts
+    get_url: 
+      url: "{{ item }}"
+      dest: ~/
+      mode: 0666
+    with_items:
+      - https://github.com/powerline/powerline/raw/develop/font/PowerlineSymbols.otf
+      - https://github.com/powerline/powerline/raw/develop/font/10-powerline-symbols.conf
+    become: false
+    when: not fonts.stat.exists
+
+  - name: Create fonts directory
+    file:
+      path: "{{ item }}"
+      state: directory
+      mode: '0755'
+    with_items:
+      - ~/.fonts/
+      - ~/.config/fontconfig/conf.d
+    become: false
+    when: not fonts.stat.exists
+
+  - name: Move fonts to directory
+    command: "{{ item }}"
+    with_items:
+      - mv ~/PowerlineSymbols.otf ~/.fonts/
+      - fc-cache -vf ~/.fonts/
+      - mv ~/10-powerline-symbols.conf ~/.config/fontconfig/conf.d/
+    become: false
+    when: not fonts.stat.exists
+
+  - name: Install packages from .deb
+    ansible.builtin.apt:
+      deb: "{{ item }}"
+    with_items:
+      - https://go.microsoft.com/fwlink/?LinkID=760868 #VSCode_64-bit
+      - https://dl.discordapp.net/apps/linux/0.0.21/discord-0.0.21.deb #Discord
+      - https://download.virtualbox.org/virtualbox/7.0.2/virtualbox-7.0_7.0.2-154219~Ubuntu~jammy_amd64.deb #VirtualBox
+
+  - name: Check if oh-my-zsh is installed
+    ansible.builtin.stat:
+      path: /usr/local/bin/aws
+    register: aws_bin
+
+  - name: install aws cli
+    ansible.builtin.shell: curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip" && unzip awscliv2.zip && sudo ./aws/install
+    when: not aws_bin.stat.exists
+
+  - name: Install packages from Git
+    ansible.builtin.git:
+      repo: "{{ item.repo }}"
+      dest: "{{ item.dest }}"
+    with_items:
+      - repo: 'https://github.com/zsh-users/zsh-autosuggestions'
+        dest: /home/{{ get_user.stdout }}/.oh-my-zsh/custom/plugins/zsh-autosuggestions
+      - repo: 'https://github.com/zsh-users/zsh-syntax-highlighting.git'
+        dest: /home/{{ get_user.stdout }}/.oh-my-zsh/custom/plugins/zsh-syntax-highlighting
+      - repo: 'https://github.com/junegunn/fzf.git'
+        dest: /home/{{ get_user.stdout }}/.fzf
+      - repo: 'https://github.com/ahmetb/kubectx'
+        dest: /opt/kubectx
+
+  - name: Install kubectx & kubens
+    file: 
+      src: "{{ item.src }}"
+      dest: "{{ item.dest }}"
+      state: link
+    with_items:
+      - src: /opt/kubectx/kubectx 
+        dest: /usr/local/bin/kubectx
+      - src: /opt/kubectx/kubens
+        dest: /usr/local/bin/kubens
+
+  - name: Check if fzf is installed
+    ansible.builtin.stat:
+      path: /home/{{ get_user.stdout }}/.fzf/bin/fzf
+    register: fzf_bin
+
+  - name: Install fzf
+    shell: /home/{{ get_user.stdout }}/.fzf/install
+    when: not fzf_bin.stat.exists
+
+  - name: Add plugin to zsh
+    ansible.builtin.lineinfile:
+      path: /home/{{ get_user.stdout }}/.zshrc
+      regexp: 'plugins='
+      line: plugins=(git zsh-autosuggestions zsh-syntax-highlighting fzf web-search)
+    become: false
+
+  - name: Add config to zsh
+    ansible.builtin.blockinfile:
+      path: /home/{{ get_user.stdout }}/.zshrc
+      block: |
+        alias k=kubectl
+        alias tf=terraform
+        alias ap=ansible-playbook
+
+        source <(kubectl completion zsh)
+        [[ /usr/bin/kubectl ]] && source <(kubectl completion zsh)
+        autoload -U +X bashcompinit && bashcompinit
+        autoload -Uz compinit && compinit
+        export FZF_COMPLETION_OPTS='--border --info=inline'
+        export KUBECONFIG=$HOME/.kube/kubeconfig_all
+        export EDITOR=nano
+        export KUBECTX_CURRENT_FGCOLOR=$(tput setaf 1) # blue text
+        export KUBECTX_CURRENT_BGCOLOR=$(tput setab 0) # white background
+    become: false
